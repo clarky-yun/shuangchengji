@@ -407,6 +407,12 @@ h3 {
   background: #8c3434;
 }
 
+.button.compact {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
 .form {
   display: grid;
   gap: 12px;
@@ -534,7 +540,28 @@ select:focus {
 
 .item-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: flex-end;
+}
+
+.reply-list {
+  display: grid;
+  gap: 8px;
+  padding-left: 12px;
+  border-left: 3px solid var(--line);
+}
+
+.reply-item {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--paper-soft);
+}
+
+.reply-form {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) auto;
+  gap: 8px;
 }
 
 .image-preview {
@@ -693,6 +720,7 @@ select:focus {
   .form-grid,
   .form-grid.three,
   .date-selects,
+  .reply-form,
   .wish-board {
     grid-template-columns: 1fr;
   }

@@ -72,6 +72,7 @@ let state = loadState();
 normalizeLegacyState();
 let currentView = "home";
 let messageFilter = "all";
+let editing = null;
 let cloudAccessCode = state.profile.accessCode;
 let cloudSyncTimer = null;
 let cloudPollTimer = null;
@@ -244,6 +245,7 @@ function normalizeLegacyState() {
       ...item,
       author: item.author === "TA" ? state.profile.personB : item.author,
       imageData: item.imageData || "",
+      replies: collection === "messages" ? item.replies || [] : item.replies,
     }));
   });
   state.wishes = state.wishes.map((item) => ({
@@ -502,6 +504,8 @@ function filterButton(value, label, activeValue) {
 }
 
 function renderMessageItem(item) {
+  if (isEditing("message", item.id)) return renderMessageEditForm(item);
+  const replies = item.replies || [];
   return `
     <article class="card feed-item">
       <div class="item-meta">
@@ -510,9 +514,59 @@ function renderMessageItem(item) {
       </div>
       <p class="item-content">${escapeHtml(item.content)}</p>
       ${renderImage(item.imageData, "留言照片")}
+      ${replies.length ? `<div class="reply-list">${replies.map(renderReplyItem).join("")}</div>` : ""}
+      <form class="reply-form" data-form="reply" data-id="${item.id}">
+        <select name="author" aria-label="回复人">
+          <option>${state.profile.personA}</option>
+          <option>${state.profile.personB}</option>
+        </select>
+        <input name="content" placeholder="回复这条留言" required />
+        <button class="button secondary compact" type="submit">回复</button>
+      </form>
       <div class="item-actions">
+        ${editActions("message", item.id)}
         <button class="icon-button" type="button" aria-label="删除留言" data-action="delete-message" data-id="${item.id}">${svgIcon("trash")}</button>
       </div>
+    </article>
+  `;
+}
+
+function renderReplyItem(reply) {
+  return `
+    <div class="reply-item">
+      <div class="item-meta">
+        <strong>${escapeHtml(reply.author)}</strong>
+        <span>${formatTime(reply.createdAt)}</span>
+      </div>
+      <p class="item-content">${escapeHtml(reply.content)}</p>
+    </div>
+  `;
+}
+
+function renderMessageEditForm(item) {
+  return `
+    <article class="card feed-item">
+      <form class="form" data-form="edit-message" data-id="${item.id}">
+        <div class="form-row">
+          <label>发送人</label>
+          <select name="author">
+            <option ${item.author === state.profile.personA ? "selected" : ""}>${state.profile.personA}</option>
+            <option ${item.author === state.profile.personB ? "selected" : ""}>${state.profile.personB}</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>留言</label>
+          <textarea name="content" required>${escapeHtml(item.content)}</textarea>
+        </div>
+        <div class="form-row">
+          <label>照片</label>
+          ${editImageField(item.imageData, `editMessageImage-${item.id}`)}
+        </div>
+        <div class="button-row">
+          <button class="button" type="submit">保存留言</button>
+          <button class="button secondary" type="button" data-action="cancel-edit">取消</button>
+        </div>
+      </form>
     </article>
   `;
 }
@@ -564,6 +618,7 @@ function renderDaily() {
 }
 
 function renderPostItem(item) {
+  if (isEditing("post", item.id)) return renderPostEditForm(item);
   return `
     <article class="card feed-item">
       <div class="item-meta">
@@ -574,8 +629,45 @@ function renderPostItem(item) {
       <p class="item-content">${escapeHtml(item.content)}</p>
       ${renderImage(item.imageData, "日常照片")}
       <div class="item-actions">
+        ${editActions("post", item.id)}
         <button class="icon-button" type="button" aria-label="删除日常" data-action="delete-post" data-id="${item.id}">${svgIcon("trash")}</button>
       </div>
+    </article>
+  `;
+}
+
+function renderPostEditForm(item) {
+  return `
+    <article class="card feed-item">
+      <form class="form" data-form="edit-post" data-id="${item.id}">
+        <div class="form-grid">
+          <div class="form-row">
+            <label>发布人</label>
+            <select name="author">
+              <option ${item.author === state.profile.personA ? "selected" : ""}>${state.profile.personA}</option>
+              <option ${item.author === state.profile.personB ? "selected" : ""}>${state.profile.personB}</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>心情</label>
+            <select name="mood">
+              ${["开心", "想你", "普通", "疲惫", "期待", "委屈"].map((mood) => `<option ${item.mood === mood ? "selected" : ""}>${mood}</option>`).join("")}
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>日常</label>
+          <textarea name="content" required>${escapeHtml(item.content)}</textarea>
+        </div>
+        <div class="form-row">
+          <label>照片</label>
+          ${editImageField(item.imageData, `editPostImage-${item.id}`)}
+        </div>
+        <div class="button-row">
+          <button class="button" type="submit">保存日常</button>
+          <button class="button secondary" type="button" data-action="cancel-edit">取消</button>
+        </div>
+      </form>
     </article>
   `;
 }
@@ -634,6 +726,7 @@ function renderWishes() {
 }
 
 function renderWishItem(item) {
+  if (isEditing("wish", item.id)) return renderWishEditForm(item);
   return `
     <article class="card feed-item">
       <div class="item-meta">
@@ -648,8 +741,49 @@ function renderWishItem(item) {
         <option value="done" ${item.status === "done" ? "selected" : ""}>已实现</option>
       </select>
       <div class="item-actions">
+        ${editActions("wish", item.id)}
         <button class="icon-button" type="button" aria-label="删除心愿" data-action="delete-wish" data-id="${item.id}">${svgIcon("trash")}</button>
       </div>
+    </article>
+  `;
+}
+
+function renderWishEditForm(item) {
+  return `
+    <article class="card feed-item">
+      <form class="form" data-form="edit-wish" data-id="${item.id}">
+        <div class="form-row">
+          <label>心愿</label>
+          <input name="title" value="${escapeAttr(item.title)}" required />
+        </div>
+        <div class="form-row">
+          <label>许愿人</label>
+          <select name="createdBy">
+            <option ${item.createdBy === state.profile.personA ? "selected" : ""}>${state.profile.personA}</option>
+            <option ${item.createdBy === state.profile.personB ? "selected" : ""}>${state.profile.personB}</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>状态</label>
+          <select name="status">
+            <option value="pending" ${item.status === "pending" ? "selected" : ""}>未开始</option>
+            <option value="doing" ${item.status === "doing" ? "selected" : ""}>进行中</option>
+            <option value="done" ${item.status === "done" ? "selected" : ""}>已实现</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>描述</label>
+          <textarea name="description">${escapeHtml(item.description || "")}</textarea>
+        </div>
+        <div class="form-row">
+          <label>照片</label>
+          ${editImageField(item.imageData, `editWishImage-${item.id}`)}
+        </div>
+        <div class="button-row">
+          <button class="button" type="submit">保存心愿</button>
+          <button class="button secondary" type="button" data-action="cancel-edit">取消</button>
+        </div>
+      </form>
     </article>
   `;
 }
@@ -689,6 +823,7 @@ function renderMemories() {
 }
 
 function renderMemoryItem(item) {
+  if (isEditing("memory", item.id)) return renderMemoryEditForm(item);
   return `
     <article class="timeline-item">
       <div class="timeline-date">${formatDate(item.memoryDate)}</div>
@@ -699,6 +834,38 @@ function renderMemoryItem(item) {
         </div>
         <p class="item-content">${escapeHtml(item.content)}</p>
         ${renderImage(item.imageData, "回忆照片")}
+        <div class="item-actions">
+          ${editActions("memory", item.id)}
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function renderMemoryEditForm(item) {
+  return `
+    <article class="timeline-item">
+      <div class="timeline-date">${formatDate(item.memoryDate)}</div>
+      <div class="card feed-item">
+        <form class="form" data-form="edit-memory" data-id="${item.id}">
+          <div class="form-row">
+            <label>标题</label>
+            <input name="title" value="${escapeAttr(item.title)}" required />
+          </div>
+          ${dateSelector("memoryDate", "回忆日期", item.memoryDate)}
+          <div class="form-row">
+            <label>内容</label>
+            <textarea name="content" required>${escapeHtml(item.content)}</textarea>
+          </div>
+          <div class="form-row">
+            <label>照片</label>
+            ${editImageField(item.imageData, `editMemoryImage-${item.id}`)}
+          </div>
+          <div class="button-row">
+            <button class="button" type="submit">保存回忆</button>
+            <button class="button secondary" type="button" data-action="cancel-edit">取消</button>
+          </div>
+        </form>
       </div>
     </article>
   `;
@@ -710,6 +877,23 @@ function renderImage(imageData, alt) {
     <a class="image-preview" href="${imageData}" target="_blank" rel="noreferrer" aria-label="查看大图">
       <img src="${imageData}" alt="${alt}" />
     </a>
+  `;
+}
+
+function isEditing(type, id) {
+  return editing?.type === type && editing?.id === id;
+}
+
+function editActions(type, id) {
+  return `
+    <button class="button secondary compact" type="button" data-action="edit-item" data-type="${type}" data-id="${id}">编辑</button>
+  `;
+}
+
+function editImageField(currentImage, inputId) {
+  return `
+    ${currentImage ? `<span class="pill">已保留原照片</span>` : ""}
+    <input id="${inputId}" name="image" type="file" accept="image/*" />
   `;
 }
 
@@ -962,6 +1146,79 @@ function readImage(file) {
   });
 }
 
+async function imageOrExisting(form, existingImage) {
+  const file = form.elements.image?.files?.[0];
+  if (!file) return existingImage || "";
+  return readImage(file);
+}
+
+async function handleEditSubmit(formType, form, data) {
+  const id = form.dataset.id;
+
+  if (formType === "edit-message") {
+    const item = state.messages.find((message) => message.id === id);
+    if (!item) return;
+    item.author = data.author;
+    item.content = data.content.trim();
+    item.imageData = await imageOrExisting(form, item.imageData);
+    item.updatedAt = new Date().toISOString();
+    editing = null;
+    saveAndRefresh("留言已保存");
+    return;
+  }
+
+  if (formType === "edit-post") {
+    const item = state.posts.find((post) => post.id === id);
+    if (!item) return;
+    item.author = data.author;
+    item.mood = data.mood;
+    item.content = data.content.trim();
+    item.imageData = await imageOrExisting(form, item.imageData);
+    item.updatedAt = new Date().toISOString();
+    editing = null;
+    saveAndRefresh("日常已保存");
+    return;
+  }
+
+  if (formType === "edit-wish") {
+    const item = state.wishes.find((wish) => wish.id === id);
+    if (!item) return;
+    const wasDone = item.status === "done";
+    item.title = data.title.trim();
+    item.createdBy = data.createdBy;
+    item.status = data.status;
+    item.description = data.description.trim();
+    item.imageData = await imageOrExisting(form, item.imageData);
+    item.completedAt = item.status === "done" ? item.completedAt || new Date().toISOString() : "";
+    item.updatedAt = new Date().toISOString();
+    if (!wasDone && item.status === "done") {
+      state.memories.unshift({
+        id: crypto.randomUUID(),
+        title: `实现心愿：${item.title}`,
+        content: item.description || "这个心愿已经实现了。",
+        memoryDate: new Date().toISOString().slice(0, 10),
+        imageData: item.imageData || "",
+        createdAt: new Date().toISOString(),
+      });
+    }
+    editing = null;
+    saveAndRefresh("心愿已保存");
+    return;
+  }
+
+  if (formType === "edit-memory") {
+    const item = state.memories.find((memory) => memory.id === id);
+    if (!item) return;
+    item.title = data.title.trim();
+    item.content = data.content.trim();
+    item.memoryDate = composeDate(data, "memoryDate");
+    item.imageData = await imageOrExisting(form, item.imageData);
+    item.updatedAt = new Date().toISOString();
+    editing = null;
+    saveAndRefresh("回忆已保存");
+  }
+}
+
 document.addEventListener("click", (event) => {
   const target = event.target.closest("[data-view], [data-action]");
   if (!target) return;
@@ -978,6 +1235,14 @@ document.addEventListener("click", (event) => {
   if (action === "pull-cloud") refreshCloudState({ silent: false });
   if (action === "export-data") exportData();
   if (action === "restore-backup") restoreBackup();
+  if (action === "edit-item") {
+    editing = { type: target.dataset.type, id: target.dataset.id };
+    render();
+  }
+  if (action === "cancel-edit") {
+    editing = null;
+    render();
+  }
   if (action === "filter-message") {
     messageFilter = target.dataset.filter;
     renderMessages();
@@ -1014,6 +1279,26 @@ document.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.target;
   const data = formDataObject(form);
+  const customForm = form.dataset.form;
+
+  if (customForm === "reply") {
+    const message = state.messages.find((item) => item.id === form.dataset.id);
+    if (!message) return;
+    message.replies = message.replies || [];
+    message.replies.push({
+      id: crypto.randomUUID(),
+      author: data.author,
+      content: data.content.trim(),
+      createdAt: new Date().toISOString(),
+    });
+    saveAndRefresh("回复已发布");
+    return;
+  }
+
+  if (customForm?.startsWith("edit-")) {
+    await handleEditSubmit(customForm, form, data);
+    return;
+  }
 
   if (form.id === "messageForm") {
     const imageData = await readImage(form.elements.image.files[0]);
