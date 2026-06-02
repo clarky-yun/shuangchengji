@@ -74,6 +74,7 @@ let currentView = "home";
 let messageFilter = "all";
 let cloudAccessCode = state.profile.accessCode;
 let cloudSyncTimer = null;
+let cloudPollTimer = null;
 let cloudStatus = hasCloudConfig() ? "云端待连接" : "本地模式";
 
 const iconPaths = {
@@ -164,6 +165,27 @@ async function loadCloudState(accessCode) {
   return true;
 }
 
+async function refreshCloudState({ silent = true } = {}) {
+  if (!hasCloudConfig() || !cloudAccessCode) return false;
+  const payload = await callSupabaseRpc("get_couple_state", {
+    p_space_id: CLOUD_SPACE_ID,
+    p_access_code: cloudAccessCode,
+  });
+  if (!payload) return false;
+
+  const incoming = JSON.stringify(payload);
+  const current = JSON.stringify(state);
+  if (incoming !== current) {
+    state = mergeState(payload);
+    normalizeLegacyState();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    cloudStatus = "云端已同步";
+    render();
+    if (!silent) showToast("已拉取云端最新内容");
+  }
+  return true;
+}
+
 function mergeState(payload) {
   return {
     ...structuredClone(defaultState),
@@ -201,6 +223,17 @@ async function saveCloudState() {
     renderSettings();
   }
   return true;
+}
+
+function startCloudPolling() {
+  if (!hasCloudConfig() || !cloudAccessCode) return;
+  clearInterval(cloudPollTimer);
+  cloudPollTimer = setInterval(() => {
+    refreshCloudState({ silent: true }).catch(() => {
+      cloudStatus = "云端同步失败";
+      renderSettings();
+    });
+  }, 12000);
 }
 
 function normalizeLegacyState() {
@@ -715,6 +748,7 @@ function renderSettings() {
         <div class="sync-note">
           <strong>共享状态</strong>
           <span>${escapeHtml(cloudStatus)}。${hasCloudConfig() ? "两个人输入同一个访问密码后，会读写同一份云端数据。" : "当前数据保存在本机浏览器。填好 Supabase 配置后，就能开启两人共享。"}</span>
+          ${hasCloudConfig() ? `<div class="button-row"><button class="button secondary" type="button" data-action="pull-cloud">拉取云端最新内容</button></div>` : ""}
         </div>
         <div class="sync-note">
           <strong>数据保护</strong>
@@ -941,6 +975,7 @@ document.addEventListener("click", (event) => {
   if (action === "go-settings") switchView("settings");
   if (action === "go") switchView(target.dataset.target);
   if (action === "refresh-weather") updateWeather(true);
+  if (action === "pull-cloud") refreshCloudState({ silent: false });
   if (action === "export-data") exportData();
   if (action === "restore-backup") restoreBackup();
   if (action === "filter-message") {
@@ -1059,6 +1094,7 @@ document.querySelector("#unlockForm").addEventListener("submit", async (event) =
       await loadCloudState(input.value);
       sessionStorage.setItem(`${STORAGE_KEY}_unlocked`, "true");
       document.querySelector("#lockScreen").hidden = true;
+      startCloudPolling();
       showToast("云端同步已连接");
       return;
     } catch {
@@ -1127,6 +1163,16 @@ function applyAccessGate() {
   document.querySelector("#lockScreen").hidden = unlocked;
   if (!unlocked) {
     setTimeout(() => document.querySelector("#unlockCode").focus(), 0);
+    return;
+  }
+  if (hasCloudConfig()) {
+    cloudAccessCode = state.profile.accessCode;
+    refreshCloudState({ silent: true })
+      .then(() => startCloudPolling())
+      .catch(() => {
+        cloudStatus = "云端同步失败";
+        renderSettings();
+      });
   }
 }
 
