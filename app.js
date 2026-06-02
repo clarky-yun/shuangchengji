@@ -1,6 +1,8 @@
 const STORAGE_KEY = "long_distance_love_app_v1";
 const BACKUP_KEY = `${STORAGE_KEY}_backup_before_upgrade`;
 const WEATHER_CACHE_MS = 20 * 60 * 1000;
+const CLOUD_CONFIG = window.DC_CONFIG || {};
+const CLOUD_SPACE_ID = CLOUD_CONFIG.spaceId || "default";
 
 const navItems = [
   { id: "home", label: "首页", title: "首页", icon: "home" },
@@ -70,6 +72,9 @@ let state = loadState();
 normalizeLegacyState();
 let currentView = "home";
 let messageFilter = "all";
+let cloudAccessCode = state.profile.accessCode;
+let cloudSyncTimer = null;
+let cloudStatus = hasCloudConfig() ? "云端待连接" : "本地模式";
 
 const iconPaths = {
   home: '<path d="M3 11.5 12 4l9 7.5"/><path d="M5 10.5V20h14v-9.5"/><path d="M9.5 20v-6h5v6"/>',
@@ -105,6 +110,97 @@ function loadState() {
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  scheduleCloudSave();
+}
+
+function hasCloudConfig() {
+  return Boolean(CLOUD_CONFIG.supabaseUrl && CLOUD_CONFIG.supabaseAnonKey);
+}
+
+async function callSupabaseRpc(functionName, body) {
+  const baseUrl = CLOUD_CONFIG.supabaseUrl.replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/rest/v1/rpc/${functionName}`, {
+    method: "POST",
+    headers: {
+      apikey: CLOUD_CONFIG.supabaseAnonKey,
+      Authorization: `Bearer ${CLOUD_CONFIG.supabaseAnonKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "云端同步失败");
+  }
+
+  return response.json();
+}
+
+async function loadCloudState(accessCode) {
+  if (!hasCloudConfig()) return false;
+  cloudStatus = "正在连接云端";
+  renderSettings();
+  const payload = await callSupabaseRpc("get_couple_state", {
+    p_space_id: CLOUD_SPACE_ID,
+    p_access_code: accessCode,
+  });
+
+  if (payload) {
+    state = mergeState(payload);
+    cloudAccessCode = accessCode;
+    normalizeLegacyState();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    cloudStatus = "云端已同步";
+    render();
+    return true;
+  }
+
+  state.profile.accessCode = accessCode;
+  cloudAccessCode = accessCode;
+  await saveCloudState();
+  cloudStatus = "已创建云端空间";
+  render();
+  return true;
+}
+
+function mergeState(payload) {
+  return {
+    ...structuredClone(defaultState),
+    ...payload,
+    profile: { ...structuredClone(defaultState.profile), ...(payload.profile || {}) },
+    messages: Array.isArray(payload.messages) ? payload.messages : [],
+    posts: Array.isArray(payload.posts) ? payload.posts : [],
+    wishes: Array.isArray(payload.wishes) ? payload.wishes : [],
+    memories: Array.isArray(payload.memories) ? payload.memories : [],
+  };
+}
+
+function scheduleCloudSave() {
+  const unlocked = sessionStorage.getItem(`${STORAGE_KEY}_unlocked`) === "true";
+  if (!hasCloudConfig() || !cloudAccessCode || !unlocked) return;
+  clearTimeout(cloudSyncTimer);
+  cloudSyncTimer = setTimeout(() => {
+    saveCloudState().catch(() => {
+      cloudStatus = "云端同步失败";
+      renderSettings();
+    });
+  }, 450);
+}
+
+async function saveCloudState() {
+  if (!hasCloudConfig() || !cloudAccessCode) return false;
+  cloudStatus = "正在同步云端";
+  const payload = await callSupabaseRpc("save_couple_state", {
+    p_space_id: CLOUD_SPACE_ID,
+    p_access_code: cloudAccessCode,
+    p_payload: state,
+  });
+  if (payload) {
+    cloudStatus = "云端已同步";
+    renderSettings();
+  }
+  return true;
 }
 
 function normalizeLegacyState() {
@@ -618,7 +714,7 @@ function renderSettings() {
         </div>
         <div class="sync-note">
           <strong>共享状态</strong>
-          <span>当前版本的数据保存在本机浏览器。每条内容已经记录发布人；接入数据库后，对方登录同一个空间就能看到。</span>
+          <span>${escapeHtml(cloudStatus)}。${hasCloudConfig() ? "两个人输入同一个访问密码后，会读写同一份云端数据。" : "当前数据保存在本机浏览器。填好 Supabase 配置后，就能开启两人共享。"}</span>
         </div>
         <div class="sync-note">
           <strong>数据保护</strong>
@@ -955,9 +1051,24 @@ document.addEventListener("submit", async (event) => {
 });
 
 document.querySelector("#quickSettings").addEventListener("click", () => switchView("settings"));
-document.querySelector("#unlockForm").addEventListener("submit", (event) => {
+document.querySelector("#unlockForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = event.target.elements.unlockCode;
+  if (hasCloudConfig()) {
+    try {
+      await loadCloudState(input.value);
+      sessionStorage.setItem(`${STORAGE_KEY}_unlocked`, "true");
+      document.querySelector("#lockScreen").hidden = true;
+      showToast("云端同步已连接");
+      return;
+    } catch {
+      input.value = "";
+      input.focus();
+      showToast("云端密码不对或连接失败");
+      return;
+    }
+  }
+
   if (input.value === state.profile.accessCode) {
     sessionStorage.setItem(`${STORAGE_KEY}_unlocked`, "true");
     document.querySelector("#lockScreen").hidden = true;

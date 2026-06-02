@@ -15,5 +15,23 @@
 
 ## 说明
 
-当前版本的数据保存在浏览器本地存储中。部署后的网页可以分享给别人预览界面，但不同设备之间的数据暂时不会同步。
+默认情况下，数据保存在浏览器本地存储中。配置 Supabase 后，可以让两个人在不同设备上共享同一份留言、日常、心愿和回忆。
 
+## 接入 Supabase
+
+1. 在 Supabase 创建一个项目。
+2. 打开项目的 SQL Editor，执行 `supabase-setup.sql`。
+3. 在项目设置里找到 Project URL 和 anon public key。
+4. 填入 `config.js`：
+
+```js
+window.DC_CONFIG = {
+  supabaseUrl: "https://你的项目.supabase.co",
+  supabaseAnonKey: "你的 anon public key",
+  spaceId: "default",
+};
+```
+
+5. 重新提交并部署。
+
+配置完成后，两个人打开同一个网址并输入同一个访问密码，就会读写同一份云端数据。
